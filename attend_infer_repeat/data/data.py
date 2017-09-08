@@ -15,6 +15,7 @@ _this_dir = os.path.dirname(__file__)
 _data_dir = os.path.abspath(os.path.join(_this_dir, '../../'), )
 _data_dir = os.path.join(_data_dir, 'data')
 _MNIST_PATH = os.path.join(_data_dir, 'MNIST_data')
+_FASHION_PATH = os.path.join(_data_dir, 'FASHION_data')
 
 
 def dim_coords(proj):
@@ -33,9 +34,9 @@ def template_dimensions(template):
 
 
 def create_mnist(partition='train', canvas_size=(50, 50), obj_size=(28, 28), n_objects=(0, 2), n_samples=None,
-                 dtype=np.uint8, expand_nums=True, with_overlap=False):
+                 dtype=np.uint8, expand_nums=True, with_overlap=False, data_folder=_MNIST_PATH):
 
-    mnist = input_data.read_data_sets(_MNIST_PATH, one_hot=False)
+    mnist = input_data.read_data_sets(data_folder, one_hot=False)
     mnist_data = getattr(mnist, partition)
 
     n_templates = mnist_data.num_examples
@@ -107,6 +108,28 @@ def create_mnist(partition='train', canvas_size=(50, 50), obj_size=(28, 28), n_o
     return dict(imgs=imgs, labels=labels, nums=nums)
 
 
+def maybe_download_fashion():
+    import urllib
+
+    urls = [
+        'http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/train-images-idx3-ubyte.gz',
+        'http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/train-labels-idx1-ubyte.gz',
+        'http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/t10k-images-idx3-ubyte.gz',
+        'http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/t10k-labels-idx1-ubyte.gz'
+    ]
+
+    if not os.path.exists(_FASHION_PATH):
+        os.makedirs(_FASHION_PATH)
+
+    reader = urllib.URLopener()
+    for url in urls:
+        basename = os.path.basename(url)
+        filename = os.path.join(_FASHION_PATH, basename)
+        if not os.path.exists(filename):
+            print 'Downloading {} and saving as {}'.format(basename, filename)
+            reader.retrieve(url, filename)
+
+
 def load_data(path, data_path=_MNIST_PATH):
     path = os.path.join(data_path, path)
 
@@ -158,16 +181,31 @@ def tensors_from_data(data_dict, batch_size, axes=None, shuffle=False):
     return tensors
 
 
-if __name__ == '__main__':
-    partitions = ['train', 'validation']
-    nums = [60000, 10000]
+def create_dataset(which, partitions, sizes):
 
-    for p, n in zip(partitions, nums):
+    if which == 'mnist':
+        target_path = _MNIST_PATH
+    else:
+        target_path = _FASHION_PATH
+        maybe_download_fashion()
+
+    for p, n in zip(partitions, sizes):
         print 'Processing partition "{}"'.format(p)
-        data = create_mnist(p, n_samples=n)
+        data = create_mnist(p, n_samples=n, data_folder=target_path)
         filename = 'mnist_{}.pickle'.format(p)
-        filename = os.path.join(_MNIST_PATH, filename)
-    
+        filename = os.path.join(target_path, filename)
+
         print 'saving to "{}"'.format(filename)
         with open(filename, 'w') as f:
             pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
+
+if __name__ == '__main__':
+
+    which = 'mnist'
+    args = sys.argv[1:]
+    if len(args) > 0:
+        which = args[0].lower()
+
+    partitions = ['train', 'validation']
+    sizes = [60000, 10000]
+    create_dataset(which, partitions, sizes)
