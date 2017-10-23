@@ -50,3 +50,22 @@ class SampleFromTensorTest(TFTestBase):
         x = np.tile(x, (2, 4, 1)) + np.arange(8).reshape(2, 4, 1)
         r = self.eval(self.sample3d, feed_dict={self.x3d: x, self.y3d: [[2, 1, 1, 2], [0, 1, 2, 0]]})
         assert_array_equal(r, [[11, 8, 9, 14], [9, 12, 17, 12]])
+
+    def test_axis(self):
+        """sample along a different axis then the last one"""
+
+        x = np.asarray([[[5, 7, 11]]])
+        x = np.tile(x, (2, 4, 1)) + np.arange(8).reshape(2, 4, 1)
+        y = np.asarray([[2, 1, 1, 2], [0, 1, 2, 0]])
+
+        x = x.reshape((2, 4, 3, 1, 1))
+        y = y.reshape((2, 4, 1, 1))
+
+        sample = sample_from_tensor(x, y, axis=-3)
+        self.assertEqual(sample.shape, y.shape)
+
+        r = self.eval(sample)
+        self.assertEqual(r.shape, y.shape)
+
+        expected = np.asarray([[11, 8, 9, 14], [9, 12, 17, 12]])[..., np.newaxis, np.newaxis]
+        assert_array_equal(r, expected)

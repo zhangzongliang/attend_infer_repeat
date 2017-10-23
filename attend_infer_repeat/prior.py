@@ -139,8 +139,7 @@ class NumStepsDistribution(object):
         if samples is None:
             return self._joint
 
-        # TODO: make sure that samples are taken along step_axis
-        probs = sample_from_tensor(self._joint, samples)
+        probs = sample_from_tensor(self._joint, samples, self._step_axis)
         return probs
 
     def log_prob(self, samples):
