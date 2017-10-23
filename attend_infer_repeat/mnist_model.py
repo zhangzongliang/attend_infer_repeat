@@ -48,7 +48,7 @@ class AIRonMNIST(AIRModel):
 class SeqAIRonMNIST(SeqAIRModel):
     """Implements AIR for the MNIST dataset"""
 
-    def __init__(self, obs, glimpse_size=(20, 20),
+    def __init__(self, obs, n_samples=1, glimpse_size=(20, 20),
                  inpt_encoder_hidden=[256]*2,
                  glimpse_encoder_hidden=[256]*2,
                  glimpse_decoder_hidden=[252]*2,
@@ -69,6 +69,7 @@ class SeqAIRonMNIST(SeqAIRModel):
             obs=obs,
             glimpse_size=glimpse_size,
             n_what=50,
+            n_samples=n_samples,
             transition=snt.LSTM(256),
             input_encoder=partial(Encoder, inpt_encoder_hidden),
             glimpse_encoder=partial(Encoder, glimpse_encoder_hidden),

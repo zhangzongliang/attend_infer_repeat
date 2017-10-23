@@ -8,7 +8,7 @@ from tensorflow.contrib.distributions import Normal
 from tensorflow.contrib.distributions.python.ops.kullback_leibler import kl as _kl
 
 import ops
-from evaluation import gradient_summaries
+from evaluation import gradient_summaries, print_vars
 from modules import SpatialTransformer, ParametrisedGaussian
 from prior import geometric_prior, NumStepsDistribution, tabular_kl
 
@@ -268,6 +268,7 @@ class SeqAIRModel(object):
                steps_predictor, kwargs):
         """Build the model. See __init__ for argument description"""
 
+        self.n_timesteps = tf.shape(self.obs)[0]
         self.decoder = AIRDecoder(self.img_size, self.glimpse_size, glimpse_decoder)
         self.cell = SeqAIRCell(self.max_steps, self.img_size, self.glimpse_size, self.n_what, self.n_samples,
                                transition,
@@ -303,6 +304,7 @@ class SeqAIRModel(object):
                    where_shift_prior=None,
                    num_steps_prior=None,
                    use_reinforce=True, baseline=None, decay_rate=None, nums=None, nums_xe_weight=0.,
+                   importance_weighted=False,
                    opt=tf.train.RMSPropOptimizer, opt_kwargs=dict(momentum=.9, centered=True)):
         """Creates the train step and the global_step
 
@@ -357,13 +359,16 @@ class SeqAIRModel(object):
             loss = ops.Loss()
             self._train_step = []
             self.learning_rate = tf.Variable(learning_rate, name='learning_rate', trainable=False)
-
             # Reconstruction Loss, - \E_q [ p(x | z, n) ]
             rec_loss_per_sample = -self.output_distrib.log_prob(self.obs[:, :, tf.newaxis])
+            shape = [self.n_timesteps] + rec_loss_per_sample.shape.as_list()[1:3] + [np.prod(self.img_size)]
+
+            self.rec_loss_per_pixel = tf.reshape(rec_loss_per_sample, shape)
             self.rec_loss_per_sample = tf.reduce_sum(rec_loss_per_sample, axis=(3, 4))
             self.rec_loss = tf.reduce_mean(self.rec_loss_per_sample)
             tf.summary.scalar('rec', self.rec_loss)
-            loss.add(self.rec_loss, self.rec_loss_per_sample)
+            # loss.add(self.rec_loss, self.rec_loss_per_sample)
+            loss.add(self.rec_loss_per_pixel)
 
             # Prior Loss, KL[ q(z, n | x) || p(z, n) ]
             if self.use_prior:
@@ -374,12 +379,24 @@ class SeqAIRModel(object):
                 loss.add(self.prior_loss, weight=self.prior_weight)
 
             # REINFORCE
-            opt_loss = loss.value
+            if importance_weighted:
+
+                elbo_per_sample = -loss.raw
+                imp_weight_per_sample = tf.exp(elbo_per_sample)
+                summed_imp_weight = tf.reduce_sum(imp_weight_per_sample, -2)
+                summed_imp_weight_per_sample = tf.reduce_sum(tf.log(summed_imp_weight), -1)
+                imp_weighted_elbo = tf.reduce_mean(summed_imp_weight_per_sample) - tf.log(float(self.n_samples))
+                opt_loss = -imp_weighted_elbo
+
+            else:
+                opt_loss = loss.value
+
             if self.use_reinforce:
 
-                self.reinforce_imp_weight = self.rec_loss_per_sample
-                if num_steps_prior is not None and not num_steps_prior.analytic:
-                    self.reinforce_imp_weight += self.prior_loss.per_sample
+                # self.reinforce_imp_weight = self.rec_loss_per_sample
+                # if num_steps_prior is not None and not num_steps_prior.analytic:
+                #     self.reinforce_imp_weight += self.prior_loss.per_sample
+                self.reinforce_imp_weight = self.prior_loss.per_sample
 
                 reinforce_loss = self._reinforce(self.reinforce_imp_weight, decay_rate)
                 opt_loss += reinforce_loss
@@ -396,17 +413,6 @@ class SeqAIRModel(object):
                               scope=self.decoder.variable_scope.name)
 
             encoder_vars = list(all_vars - set(baseline_vars) - set(decoder_vars))
-
-            def print_vars(vars, name=None):
-                if name is not None:
-                    print name,
-                print len(vars)
-                n_vars = 0
-                for v in vars:
-                    shape = v.shape.as_list()
-                    n_vars += np.prod(shape)
-                    print v.name, shape
-                print 'total parameters:', n_vars
 
             print_vars(encoder_vars, 'encoder')
             print_vars(decoder_vars, 'decoder')
@@ -470,6 +476,8 @@ class SeqAIRModel(object):
                     self.num_steps_prior_prob = geometric_prior(steps_prior_success_prob, self.max_steps)
                     self.num_steps_posterior_prob = self.num_steps_distrib.prob()[..., 0, 0]
                     steps_kl = tabular_kl(self.num_steps_posterior_prob, self.num_steps_prior_prob)
+                    self.kl_num_steps_per_step = steps_kl
+
                     self.kl_num_steps_per_sample = tf.reduce_sum(steps_kl, 2)
 
                     self.kl_num_steps = tf.reduce_mean(self.kl_num_steps_per_sample)
@@ -477,7 +485,10 @@ class SeqAIRModel(object):
 
                     weight = getattr(num_steps_prior, 'weight', 1.)
                     self.kl_num_steps_per_sample = tf.tile(self.kl_num_steps_per_sample[..., tf.newaxis], (1, 1, self.n_samples))
-                    prior_loss.add(self.kl_num_steps, self.kl_num_steps_per_sample, weight=weight)
+
+                    # prior_loss.add(self.kl_num_steps, self.kl_num_steps_per_sample, weight=weight)
+                    steps_kl = tf.tile(steps_kl[..., tf.newaxis, :], (1, 1, self.n_samples, 1))
+                    prior_loss.add(steps_kl)
 
                 if num_steps_prior.analytic:
                     # reverse cumsum of q(n) needed to compute \E_{q(n)} [ KL[ q(z|n) || p(z|n) ]]
@@ -497,20 +508,25 @@ class SeqAIRModel(object):
             # # from the E step, and now we're maximising with respect to the argument of the expectation.
             # self.prior_step_weight = tf.stop_gradient(self.prior_step_weight)
 
-            conditional_kl_weight = 1.
             if what_prior is not None:
                 with tf.variable_scope('what'):
 
                     prior = Normal(what_prior.loc, what_prior.scale)
                     posterior = Normal(self.what_loc, self.what_scale)
 
-                    what_kl = _kl(posterior, prior)
-                    what_kl = tf.reduce_sum(what_kl, -1) * self.prior_step_weight
+                    what_kl_raw = _kl(posterior, prior) * self.prior_step_weight[..., tf.newaxis]
+                    print 'what_kl', what_kl_raw
+                    what_kl = tf.reduce_sum(what_kl_raw, -1)
                     what_kl_per_sample = tf.reduce_sum(what_kl, 2)
 
                     self.kl_what = tf.reduce_mean(what_kl_per_sample)
                     tf.summary.scalar('kl_what', self.kl_what)
-                    prior_loss.add(self.kl_what, what_kl_per_sample, weight=conditional_kl_weight)
+                    # prior_loss.add(self.kl_what, what_kl_per_sample, weight=conditional_kl_weight)
+
+                    shape = [self.n_timesteps, self.batch_size, self.n_samples, self.max_steps * self.n_what]
+                    what_kl_raw = tf.transpose(what_kl_raw, (0, 1, 3, 4, 2))
+                    what_kl_raw = tf.reshape(what_kl_raw, shape)
+                    prior_loss.add(what_kl_raw)
 
             if where_scale_prior is not None and where_shift_prior is not None:
                 with tf.variable_scope('where'):
@@ -534,11 +550,17 @@ class SeqAIRModel(object):
                     shift_prior = Normal(shift_mean, where_shift_prior.scale)
 
                     shift_kl = _kl(shift_distrib, shift_prior)
-                    where_kl = tf.reduce_sum(scale_kl + shift_kl, -1)[..., tf.newaxis] * self.prior_step_weight
+                    where_kl = tf.concat([shift_kl, scale_kl], -1)
+                    where_kl = where_kl[..., tf.newaxis, :] * step_weight[..., tf.newaxis]
+                    # where_kl = tf.reduce_sum(scale_kl + shift_kl, -1)[..., tf.newaxis] * self.prior_step_weight
                     where_kl_per_sample = tf.reduce_sum(where_kl, 2)
                     self.kl_where = tf.reduce_mean(where_kl_per_sample)
                     tf.summary.scalar('kl_where', self.kl_where)
-                    prior_loss.add(self.kl_where, where_kl_per_sample, weight=conditional_kl_weight)
+                    # prior_loss.add(self.kl_where, where_kl_per_sample, weight=conditional_kl_weight)
+
+                    where_kl = tf.transpose(where_kl, (0, 1, 3, 4, 2))
+                    where_kl = tf.reshape(where_kl, (self.n_timesteps, self.batch_size, self.n_samples, self.max_steps * 4))
+                    prior_loss.add(where_kl)
 
         return prior_loss
 
@@ -551,9 +573,13 @@ class SeqAIRModel(object):
         if self.baseline is not None:
             if not isinstance(self.baseline, tf.Tensor):
                 self.baseline_module = self.baseline
-                self.baseline = self.baseline_module(self.obs, self.what, self.where, self.presence, self.final_state)
+                what = tf.reduce_mean(self.what_loc, -1)
+                self.baseline = self.baseline_module(self.obs, what, self.where_loc,
+                                                     self.presence_prob, self.final_state)
+                self.baseline = self.baseline[..., tf.newaxis]
                 self.baseline_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
                                                        scope=self.baseline_module.variable_scope.name)
+
             importance_weight -= self.baseline
 
         axes = range(len(importance_weight.get_shape()))
@@ -570,7 +596,7 @@ class SeqAIRModel(object):
         tf.summary.scalar('imp_weight_mean', imp_weight_mean)
         tf.summary.scalar('imp_weight_var', imp_weight_var)
 
-        reinforce_loss_per_sample = tf.stop_gradient(self.importance_weight) * log_prob[..., tf.newaxis]
+        reinforce_loss_per_sample = tf.stop_gradient(self.importance_weight) * log_prob
         self.reinforce_loss = tf.reduce_mean(reinforce_loss_per_sample)
         tf.summary.scalar('reinforce_loss', self.reinforce_loss)
 

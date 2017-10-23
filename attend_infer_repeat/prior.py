@@ -139,6 +139,7 @@ class NumStepsDistribution(object):
         if samples is None:
             return self._joint
 
+        # TODO: implement using tf.gather_nd instead? that'd be safer despite unittests for sample_from_tensor.
         probs = sample_from_tensor(self._joint, samples, self._step_axis)
         return probs
 

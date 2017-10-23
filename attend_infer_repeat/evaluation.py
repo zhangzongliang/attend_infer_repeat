@@ -281,3 +281,21 @@ def gradient_summaries(gvs, norm=True, ratio=True, histogram=True):
 
             if histogram:
                 tf.summary.histogram('/'.join(('grad_hist', var_name)), g)
+
+
+def print_vars(vars, name=None):
+    """Prints names and shapes of tf variables in `vars` and the total number of parameters
+
+    :param vars: list of tf.Tensors
+    :param name: string, a name to print before everything else
+    :return:
+    """
+    if name is not None:
+        print name,
+    print len(vars)
+    n_vars = 0
+    for v in vars:
+        shape = v.shape.as_list()
+        n_vars += np.prod(shape)
+        print v.name, shape
+    print 'total parameters:', n_vars
