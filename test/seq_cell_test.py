@@ -29,11 +29,12 @@ class SeqCellTest(unittest.TestCase):
         n_what = 13
         n_steps_per_image = 3
         n_timesteps = 1
+        n_samples = 3
 
         x = tf.placeholder(tf.float32, (n_timesteps, batch_size,) + img_size, name='inpt')
 
         modules = make_modules()
-        air = SeqAIRCell(n_steps_per_image, img_size, crop_size, n_what, **modules)
+        air = SeqAIRCell(n_steps_per_image, img_size, crop_size, n_what, n_samples, **modules)
         initial_state = air.initial_state(x[0])
 
         outputs, state = tf.nn.dynamic_rnn(air, x, initial_state=initial_state, time_major=True)

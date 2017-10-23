@@ -14,8 +14,6 @@ class GeometricPriorTest(TFTestBase):
 
     def test(self):
         prob = .75
-        # prob = 1. - 1e-15
-        # prob = 1e-7
         n_steps = 10
         expected = (1. - prob) * prob ** np.arange(n_steps + 1)
         p = geometric_prior(prob, n_steps)
@@ -123,8 +121,8 @@ class ConditionalPresencePosteriorTest(TFTestBase):
 class BernoulliToModifiedGeometricTest(TFTestBase):
 
     vars = {
-        'x': [tf.float32, [None, None]],
-        'y': [tf.float32, [None]]
+        'x': [tf.float32, [None, 3]],
+        'y': [tf.float32, [3]]
     }
 
     @classmethod
@@ -134,8 +132,35 @@ class BernoulliToModifiedGeometricTest(TFTestBase):
         cls.geom_1d = bernoulli_to_modified_geometric(cls.y)
 
     def test_1d(self):
+        self.assertEqual(self.geom.shape.ndims, 2)
+        self.assertEqual(self.geom_1d.shape.ndims, 1)
+
+        expected = [.9, .09, .009, .001]
         probs = self.eval(self.geom_1d, yy=[.1, .1, .1])
-        print probs
+        self.assertEqual(probs.shape, (4,))
+        assert_array_almost_equal(probs, expected)
+
+    def test_tensor(self):
+
+        x = tf.placeholder(tf.float32, [None]*3)
+        geom = bernoulli_to_modified_geometric(x)
+        self.assertEqual(geom.shape.ndims, 3)
+
+        expected = np.asarray([.9, .09, .009, .001]).reshape(1, 1, 4)
+        y = np.asarray([.1, .1, .1]).reshape((1, 1, 3))
+        probs = self.eval(geom, feed_dict={x: y})
+        self.assertEqual(probs.shape, (1, 1, 4))
+        assert_array_almost_equal(probs, expected)
+
+    def test_axis(self):
+        x = tf.placeholder(tf.float32, [1, 3, 1])
+        geom = bernoulli_to_modified_geometric(x, axis=-2)
+
+        expected = np.asarray([.9, .09, .009, .001]).reshape(1, 4, 1)
+        y = np.asarray([.1, .1, .1]).reshape((1, 3, 1))
+        probs = self.eval(geom, feed_dict={x: y})
+        self.assertEqual(probs.shape, (1, 4, 1))
+        assert_array_almost_equal(probs, expected)
 
 
 class NumStepsKLTest(TFTestBase):

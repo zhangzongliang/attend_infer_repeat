@@ -122,7 +122,7 @@ def sample_from_tensor(tensor, idx):
 
     assert tensor.shape.ndims == (idx.shape.ndims + 1) \
            or ((tensor.shape.ndims == idx.shape.ndims) and (idx.shape[-1] == 1)), \
-        'Shapes: tensor={} vs idx={}'.format(tensor.shape.ndims, idx.shape.ndims)
+        'Ndims: `tensor` = {} vs `idx` = {}'.format(tensor.shape.ndims, idx.shape.ndims)
 
     batch_shape = tf.shape(tensor)[:-1]
     trailing_dim = int(tensor.shape[-1])

@@ -25,11 +25,12 @@ class SeqModelTest(unittest.TestCase):
     def test_instantiate(self):
         learning_rate = 1e-4
         batch_size = 10
-        img_size = (5, 7)
+        img_size = (5, 13)
         crop_size = (2, 2)
-        n_what = 13
+        n_what = 17
         n_steps_per_image = 3
-        n_timesteps = 11
+        n_timesteps = 7
+        n_sampels = 11
 
         num_steps_prior = AttrDict(
             anneal='exp',
@@ -49,7 +50,7 @@ class SeqModelTest(unittest.TestCase):
         nums = tf.placeholder(tf.float32, (None, batch_size, 1), name='nums')
 
         modules = make_modules()
-        air = SeqAIRModel(imgs, n_steps_per_image, crop_size, n_what, **modules)
+        air = SeqAIRModel(imgs, n_steps_per_image, crop_size, n_what, n_sampels, **modules)
         outputs = AttrDict({k: getattr(air, k) for k in air.cell.output_names})
         print 'Constructed model'
 

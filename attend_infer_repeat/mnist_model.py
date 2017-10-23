@@ -68,7 +68,7 @@ class SeqAIRonMNIST(SeqAIRModel):
             *args,
             obs=obs,
             glimpse_size=glimpse_size,
-            n_appearance=50,
+            n_what=50,
             transition=snt.LSTM(256),
             input_encoder=partial(Encoder, inpt_encoder_hidden),
             glimpse_encoder=partial(Encoder, glimpse_encoder_hidden),

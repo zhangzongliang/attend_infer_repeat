@@ -40,14 +40,14 @@ def _cumprod(tensor, axis=0):
     :return: tf.Tensor
     """
     transpose_permutation = None
-    n_dim = len(tensor.get_shape())
+    n_dim = int(tensor.shape.ndims)
     if n_dim > 1 and axis != 0:
 
         if axis < 0:
             axis += n_dim
 
         transpose_permutation = np.arange(n_dim)
-        transpose_permutation[-1], transpose_permutation[0] = 0, axis
+        transpose_permutation[axis], transpose_permutation[0] = 0, axis
 
     tensor = tf.transpose(tensor, transpose_permutation)
 
@@ -59,12 +59,31 @@ def _cumprod(tensor, axis=0):
     return tensor
 
 
-def bernoulli_to_modified_geometric(presence_prob):
+def bernoulli_to_modified_geometric(presence_prob, axis=-1):
+    """Converts probabilities of independent Bernoulli events into a NumStepsDistribution
+    via stick-braking construction.
+
+    :param presence_prob: tf.Tensor, prob of independent Bernoulli events
+    :param axis: int, axis along which step probs should be computed
+    :return: tf.Tensor of shape = presence.prob_shape; shape[axis] += 1
+    """
     presence_prob = tf.cast(presence_prob, tf.float64)
     inv = 1. - presence_prob
-    prob = _cumprod(presence_prob, axis=-1)
-    modified_prob = tf.concat([inv[..., :1], inv[..., 1:] * prob[..., :-1], prob[..., -1:]], -1)
-    modified_prob /= tf.reduce_sum(modified_prob, -1, keep_dims=True)
+    prob = _cumprod(presence_prob, axis=axis)
+
+    try:
+        n_steps = int(prob.shape[axis])
+    except TypeError:
+        n_steps = tf.shape(prob)[axis]
+
+    if axis < 0:
+        axis = presence_prob.shape.ndims + axis
+
+    inv_first, inv_remaining = tf.split(inv, (1, n_steps-1), axis=axis)
+    prob_until_last, prob_last = tf.split(prob, (n_steps -1, 1), axis=axis)
+
+    modified_prob = tf.concat([inv_first, inv_remaining * prob_until_last, prob_last], axis)
+    modified_prob /= tf.reduce_sum(modified_prob, axis, keep_dims=True)
     return tf.cast(modified_prob, tf.float32)
 
 
@@ -96,13 +115,15 @@ class NumStepsDistribution(object):
     Transforms Bernoulli probabilities of an event = 1 into p(n) where n is the number of steps
     as described in the AIR paper."""
 
-    def __init__(self, steps_probs):
+    def __init__(self, steps_probs, step_axis=-1):
         """
 
         :param steps_probs: tensor; Bernoulli success probabilities
+        :param step_axis: int, axis along which to compute step probabilities
         """
         self._steps_probs = steps_probs
-        self._joint = bernoulli_to_modified_geometric(steps_probs)
+        self._step_axis = step_axis
+        self._joint = bernoulli_to_modified_geometric(steps_probs, step_axis)
         self._bernoulli = None
 
     def sample(self, n=None):
@@ -118,6 +139,7 @@ class NumStepsDistribution(object):
         if samples is None:
             return self._joint
 
+        # TODO: make sure that samples are taken along step_axis
         probs = sample_from_tensor(self._joint, samples)
         return probs
 
