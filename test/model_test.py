@@ -34,12 +34,14 @@ class ModelTest(unittest.TestCase):
         crop_size = (2, 2)
         n_what = 13
         n_steps_per_image = 3
+        n_samples = 11
 
         imgs = tf.placeholder(tf.float32, (batch_size,) + img_size, name='inpt')
         nums = tf.placeholder(tf.float32, (batch_size, 1), name='nums')
 
         modules = make_modules()
-        air = AIRModelWithPriors(imgs, n_steps_per_image, crop_size, n_what, **modules)
+        air = AIRModelWithPriors(imgs, n_steps_per_image, crop_size, n_what,
+                                 n_samples=n_samples, **modules)
         outputs = AttrDict({k: getattr(air, k) for k in air.cell.output_names})
         print 'Constructed model'
 

@@ -23,7 +23,11 @@ class Loss(object):
         if value is None:
             value = expr
         else:
-            assert value.get_shape().as_list() == expr.get_shape().as_list(), 'Shape should be {} but is {}'.format(value.get_shape(), expr.get_shape())
+            vshape, eshape = value.shape, expr.shape
+            shape_ok = vshape.ndims == eshape.ndims
+            for vs, es in zip(vshape, eshape):
+                shape_ok = shape_ok and (vs == es or vs == 1 or es == 1)
+            assert shape_ok, 'Shape should be {} but is {}'.format(value.get_shape(), expr.get_shape())
             value += expr
 
         setattr(self, name, value)
@@ -98,7 +102,6 @@ def anneal_weight(init_val, final_val, anneal_type, global_step, anneal_steps, h
 
 def sample_from_1d_tensor(arr, idx):
     """Takes samples from `arr` indicated by `idx`
-
     :param arr:
     :param idx:
     :return:
@@ -111,27 +114,28 @@ def sample_from_1d_tensor(arr, idx):
     return arr
 
 
-def sample_from_tensor(tensor, idx):
+def sample_from_tensor(tensor, idx, axis=-1):
     """Takes sample from `tensor` indicated by `idx`, works for minibatches
-
     :param tensor:
     :param idx:
     :return:
     """
-    tensor = tf.convert_to_tensor(tensor)
+    tensor, idx = (tf.convert_to_tensor(i) for i in (tensor, idx))
 
-    assert tensor.shape.ndims == (idx.shape.ndims + 1) \
-           or ((tensor.shape.ndims == idx.shape.ndims) and (idx.shape[-1] == 1)), \
-        'Shapes: tensor={} vs idx={}'.format(tensor.shape.ndims, idx.shape.ndims)
+    # assert tensor.shape.ndims == (idx.shape.ndims + 1) \
+    #        or ((tensor.shape.ndims == idx.shape.ndims) and (idx.shape[-1] == 1)), \
+    #     'Ndims: `tensor` = {} vs `idx` = {}'.format(tensor.shape.ndims, idx.shape.ndims)
 
-    batch_shape = tf.shape(tensor)[:-1]
-    trailing_dim = int(tensor.shape[-1])
+    batch_shape = tf.shape(tensor)[:axis]
+    trailing_dim = int(tensor.shape[axis])
     n_elements = tf.reduce_prod(batch_shape)
     shift = tf.range(n_elements) * trailing_dim
 
     tensor_flat = tf.reshape(tensor, (-1,))
-    idx_flat = tf.reshape(tf.to_int32(idx), (-1,)) + shift
-    samples_flat = sample_from_1d_tensor(tensor_flat, idx_flat)
-    samples = tf.reshape(samples_flat, batch_shape)
+    idx_flat = tf.reshape(tf.to_int32(idx), (n_elements, -1)) + shift[:, tf.newaxis]
+    idx_flat = tf.reshape(idx_flat, (-1,))
 
+    samples_flat = sample_from_1d_tensor(tensor_flat, idx_flat)
+    samples = tf.reshape(samples_flat, tf.shape(idx))
+    samples.set_shape(idx.shape)
     return samples

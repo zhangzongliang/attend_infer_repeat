@@ -27,9 +27,12 @@ class KLMixin(object):
 
     def _kl_num_steps(self):
         num_steps_posterior_prob = self.num_steps_posterior.prob()
+        print 'num_steps_prob', num_steps_posterior_prob
         steps_kl = tabular_kl(num_steps_posterior_prob, self.num_step_prior_prob)
-        kl_num_steps_per_sample = tf.squeeze(tf.reduce_sum(steps_kl, 1))
+        kl_num_steps_per_sample = tf.squeeze(tf.reduce_sum(steps_kl, -1))
+        print kl_num_steps_per_sample.shape
         kl_num_steps = tf.reduce_mean(kl_num_steps_per_sample)
+        print 'num_steps', kl_num_steps.shape, kl_num_steps_per_sample.shape
         return kl_num_steps, kl_num_steps_per_sample
 
     def _ordered_step_prob(self):
@@ -39,11 +42,15 @@ class KLMixin(object):
             ordered_step_prob = tf.cumsum(ordered_step_prob, axis=-1, reverse=True)
         else:
             ordered_step_prob = tf.squeeze(self.presence)
+
+        print 'ordered_step_prob', ordered_step_prob
         return ordered_step_prob
 
     def _kl_what(self):
         what_kl = _kl(self.what_posterior, self.what_prior)
+        print 'what_kl', what_kl
         what_kl = tf.reduce_sum(what_kl, -1) * self.ordered_step_prob
+        print 'o_what_kl', what_kl
         what_kl_per_sample = tf.reduce_sum(what_kl, -1)
         kl_what = tf.reduce_mean(what_kl_per_sample)
         return kl_what, what_kl_per_sample
@@ -54,6 +61,7 @@ class KLMixin(object):
         where_kl = tf.reduce_sum(scale_kl + shift_kl, -1) * self.ordered_step_prob
         where_kl_per_sample = tf.reduce_sum(where_kl, -1)
         kl_where = tf.reduce_mean(where_kl_per_sample)
+        print 'kl_where', where_kl_per_sample.shape
         return kl_where, where_kl_per_sample
 
 
@@ -61,7 +69,7 @@ class LogLikelihoodMixin(object):
 
     def _log_likelihood(self):
         # Reconstruction Loss, - \E_q [ p(x | z, n) ]
-        rec_loss_per_sample = -self.output_distrib.log_prob(self.obs)
-        rec_loss_per_sample = tf.reduce_sum(rec_loss_per_sample, axis=(1, 2))
+        rec_loss_per_sample = -self.output_distrib.log_prob(self.obs[:, tf.newaxis])
+        rec_loss_per_sample = tf.reduce_sum(rec_loss_per_sample, axis=(-2, -1))
         rec_loss = tf.reduce_mean(rec_loss_per_sample)
         return rec_loss, rec_loss_per_sample

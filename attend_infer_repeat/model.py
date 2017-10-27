@@ -11,7 +11,6 @@ from prior import NumStepsDistribution
 from modules import AIRDecoder
 
 
-# TODO: extract things related to NVIL to a separate class, possibly a mixin
 # TODO: implement IWAE
 # TODO: implement VIMCO as a mixin
 
@@ -26,7 +25,7 @@ class AIRModel(object):
 
     def __init__(self, obs, max_steps, glimpse_size,
                  n_what, transition, input_encoder, glimpse_encoder, glimpse_decoder, transform_estimator,
-                 steps_predictor,
+                 steps_predictor, n_samples=1,
                  output_std=1., discrete_steps=True, output_multiplier=1.,
                  debug=False, **cell_kwargs):
         """Creates the model.
@@ -52,9 +51,12 @@ class AIRModel(object):
         self.max_steps = max_steps
         self.glimpse_size = glimpse_size
         self.n_what = n_what
+        self.n_samples = n_samples
         self.output_std = output_std
         self.discrete_steps = discrete_steps
         self.debug = debug
+
+        print 'n_samples', 1
 
         with tf.variable_scope(self.__class__.__name__):
             self.output_multiplier = tf.Variable(output_multiplier, dtype=tf.float32, trainable=False, name='canvas_multiplier')
@@ -71,8 +73,8 @@ class AIRModel(object):
         # save existing variables to know later what we've created
         previous_vars = tf.trainable_variables()
 
-        self.decoder = AIRDecoder(self.img_size, self.glimpse_size, glimpse_decoder)
-        self.cell = AIRCell(self.img_size, self.glimpse_size, self.n_what, transition,
+        self.decoder = AIRDecoder(self.img_size, self.glimpse_size, glimpse_decoder, batch_dims=3)
+        self.cell = AIRCell(self.img_size, self.glimpse_size, self.n_what, self.n_samples, transition,
                             input_encoder, glimpse_encoder, transform_estimator, steps_predictor,
                             discrete_steps=self.discrete_steps,
                             debug=self.debug,
@@ -83,13 +85,18 @@ class AIRModel(object):
         dummy_sequence = tf.zeros((self.max_steps, self.batch_size, 1), name='dummy_sequence')
         outputs, state = tf.nn.dynamic_rnn(self.cell, dummy_sequence, initial_state=initial_state, time_major=True)
 
-        for name, output in zip(self.cell.output_names, outputs):
-            output = tf.transpose(output, (1, 0, 2))
+        many = [0, 1, 2, 3, len(outputs) - 1]
+        for i, (name, output) in enumerate(zip(self.cell.output_names, outputs)):
+            if i in many:
+                output = tf.reshape(output, (self.max_steps, self.batch_size, self.n_samples, -1))
+            else:
+                output = tf.reshape(output, (self.max_steps, self.batch_size, 1, -1))
+            output = tf.transpose(output, (1, 2, 0, 3))
             setattr(self, name, output)
 
         self.canvas, self.glimpse = self.decoder(self.what, self.where, self.presence)
 
-        self.final_state = state[-2]
+        self.final_state = state[1]
         self.num_step_per_sample = tf.to_float(tf.reduce_sum(tf.squeeze(self.presence), -1))
         self.num_step = tf.reduce_mean(self.num_step_per_sample)
         tf.summary.scalar('num_step', self.num_step)
@@ -164,6 +171,9 @@ class AIRModel(object):
             self.gt_num_steps = tf.squeeze(tf.reduce_sum(nums, 0))
             self.num_step_accuracy = tf.reduce_mean(tf.to_float(tf.equal(self.gt_num_steps, self.num_step_per_sample)))
 
+        print 'rec_loss', self.rec_loss.per_sample.shape
+        print 'kl_div', self.kl_div.per_sample.shape
+
         # negative ELBO
         self.nelbo = self.rec_loss.value + self.kl_div.value
         return self._train_step, tf.train.get_or_create_global_step()
@@ -189,7 +199,7 @@ class AIRModel(object):
 
                 self.kl_num_steps, self.kl_num_steps_per_sample = self._kl_num_steps()
                 tf.summary.scalar('kl_num_steps', self.kl_num_steps)
-                kl_divergence.add(self.kl_num_steps, self.kl_num_steps_per_sample)
+                kl_divergence.add(self.kl_num_steps, self.kl_num_steps_per_sample[:, tf.newaxis])
 
             self.ordered_step_prob = self._ordered_step_prob()
             with tf.variable_scope('what'):

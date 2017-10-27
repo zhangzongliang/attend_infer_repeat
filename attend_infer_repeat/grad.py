@@ -43,7 +43,12 @@ class NVILEstimator(object):
         """Implements REINFORCE for training the discrete probability distribution over number of steps and train-step
          for the baseline"""
 
+        print 'num_steps_per_sample', self.num_step_per_sample.shape
+        print 'num_steps_psoterior', self.num_steps_posterior.prob().shape
+        # TODO: not sure if this is ok
         log_prob = self.num_steps_posterior.log_prob(self.num_step_per_sample)
+
+        print 'log_prob', log_prob
 
         if self.baseline is not None:
                importance_weight -= self.baseline
